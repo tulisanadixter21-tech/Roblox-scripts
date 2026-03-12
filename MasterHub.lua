@@ -1,9 +1,11 @@
 --[[ 
-    MASTER HUB V6.9 - SHIFT KEY AIMBOT
-    Panic Key: Right-Shift | Aimbot Key: Hold Left-Shift
+    MASTER HUB V7.0 - SMOOTH COMBAT
+    Panic Key: Right-Shift | Aimbot: Hold Left-Shift
+    Smoothness: Camera glides to target instead of snapping.
 ]]
 
 local Settings = {
+    -- Toggles
     ClickerEnabled = false,
     Aimbot_Enabled = false,
     ESP_Enabled = false,
@@ -13,12 +15,13 @@ local Settings = {
     InfJump = false,
     AutoEquip = false,
     
+    -- Config
     ClickPos = Vector2.new(500, 500),
     Interval = 0.07,
     FlySpeed = 50,
     AimPart = "Head",
-    -- CHANGE: Now uses Left Shift instead of Right Click
-    AimKey = Enum.KeyCode.LeftShift 
+    AimKey = Enum.KeyCode.LeftShift,
+    Smoothness = 0.15 -- LOWER = Smoother/Slower | HIGHER = Snappier/Faster
 }
 
 local Players = game:GetService("Players")
@@ -28,24 +31,16 @@ local RunService = game:GetService("RunService")
 local VIM = game:GetService("VirtualInputManager")
 local Camera = workspace.CurrentCamera
 
--- --- 1. OPTIMIZED COMBAT ENGINE ---
-local frameCount = 0
+-- --- 1. SMOOTH COMBAT ENGINE ---
 RunService.RenderStepped:Connect(function()
-    frameCount = (frameCount + 1) % 2
-    if frameCount ~= 0 then return end 
-
-    -- AIMBOT LOGIC: Toggle ON + Holding Left Shift
     if Settings.Aimbot_Enabled and UIS:IsKeyDown(Settings.AimKey) then
         local Target, MaxDist = nil, 600
+        
         for _, v in pairs(Players:GetPlayers()) do
             if v ~= LP and v.Character and v.Character:FindFirstChild(Settings.AimPart) then
-                
-                -- REFINED TEAM CHECK
-                if Settings.TeamCheck then
-                    -- Ignore if they are on your team OR if they are "Neutral" (common in lobbies)
-                    if v.Team == LP.Team or v.TeamColor == LP.TeamColor or v.Neutral == true then 
-                        continue 
-                    end
+                -- Improved Team Check
+                if Settings.TeamCheck and (v.Team == LP.Team or v.TeamColor == LP.TeamColor or v.Neutral) then 
+                    continue 
                 end
                 
                 local pos, onScreen = Camera:WorldToViewportPoint(v.Character[Settings.AimPart].Position)
@@ -55,12 +50,18 @@ RunService.RenderStepped:Connect(function()
                 end
             end
         end
+        
         if Target then 
-            Camera.CFrame = CFrame.new(Camera.CFrame.Position, Target.Character[Settings.AimPart].Position) 
+            -- SMOOTH LERP LOGIC
+            local targetPos = Target.Character[Settings.AimPart].Position
+            local targetCFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+            
+            -- Camera glides toward the target CFrame
+            Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, Settings.Smoothness)
         end
     end
 
-    -- Movement (Fly/NoClip)
+    -- Movement (Fly/NoClip) - Runs every frame for smoothness
     if LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
         if Settings.NoClip then
             for _, v in pairs(LP.Character:GetDescendants()) do
@@ -106,17 +107,16 @@ end
 -- UI Buttons
 MakeBtn("🚨 PANIC (R-SHIFT)", nil, Color3.fromRGB(200, 0, 0), function() 
     for k, v in pairs(Settings) do if type(v) == "boolean" then Settings[k] = false end end
-    RunService:Set3dRenderingEnabled(true)
 end)
 MakeBtn("🖱️ CLICKER", "ClickerEnabled", Color3.fromRGB(0, 180, 100))
-MakeBtn("🎯 AIMBOT (L-SHIFT)", "Aimbot_Enabled", Color3.fromRGB(255, 140, 0))
+MakeBtn("🎯 SMOOTH AIM (SHIFT)", "Aimbot_Enabled", Color3.fromRGB(255, 140, 0))
 MakeBtn("👁️ ESP", "ESP_Enabled", Color3.fromRGB(255, 50, 50))
 MakeBtn("✈️ FLY", "Flying", Color3.fromRGB(0, 150, 255))
 MakeBtn("👻 NOCLIP", "NoClip", Color3.fromRGB(130, 130, 130))
 MakeBtn("🦘 INF JUMP", "InfJump", Color3.fromRGB(180, 0, 255))
 MakeBtn("👥 TEAM CHECK", "TeamCheck", Color3.fromRGB(50, 100, 255))
 
--- Background Clicker Loop
+-- Clicker Loop
 task.spawn(function()
     while true do
         if Settings.ClickerEnabled then
