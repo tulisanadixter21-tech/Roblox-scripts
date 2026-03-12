@@ -732,6 +732,16 @@ local tabList = NewList(tabBar, Enum.FillDirection.Horizontal, Enum.HorizontalAl
     Enum.VerticalAlignment.Center, 0)
 tabList.Parent = tabBar
 
+--[[
+    FIX: tabPages stores the PAGE FRAME (not the scroll).
+    SetTab shows/hides the PAGE FRAME.
+    Content helpers (CreateToggle etc.) receive the SCROLL FRAME via tabScrolls.
+    Previously tabPages was overwritten with the scroll, so pg.Visible was
+    being set on a ScrollingFrame (no visual effect) while the page Frame
+    stayed permanently hidden.
+]]
+local tabScrolls = {}  -- scroll containers passed to content helpers
+
 local function SetTab(tabName)
     for _, td in ipairs(TABS) do
         local pg  = tabPages[td.name]
@@ -740,8 +750,9 @@ local function SetTab(tabName)
         if pg then
             pg.Visible = on
             if on then
-                pg.Position = UDim2.new(0,0,0,6)
-                tw(pg, TI.fast, { Position = UDim2.new(0,0,0,0) })
+                -- slide in from slightly below the final resting position
+                pg.Position = UDim2.new(0, 0, 0, 98)
+                tw(pg, TI.fast, { Position = UDim2.new(0, 0, 0, 90) })
             end
         end
         if btn then
@@ -769,34 +780,38 @@ for _, td in ipairs(TABS) do
     btn.MouseButton1Click:Connect(function() SetTab(td.name) end)
     tabBtns[td.name] = btn
 
-    -- page frame (content area for this tab)
+    -- FIX: page Frame is NOT transparent — it is the visible container.
+    -- It sits below titleBar (z=5) and tabBar (z=5), so z=2 keeps it behind them.
     local page = NewFrame(win, {
-        bg   = C.bg,
-        trans= 1,
-        size = UDim2.new(1,0,1,-92),
-        pos  = UDim2.new(0,0,0,92),
+        bg   = C.bg,      -- solid background, NOT trans=1
+        trans= 0,
+        size = UDim2.new(1, 0, 1, -90),   -- fills window below tab bar
+        pos  = UDim2.new(0, 0, 0, 90),    -- starts right below tab bar (50+40)
         clip = true,
-        z    = 3,
+        z    = 2,         -- behind title/tab bars but above window bg
         name = "Page_"..td.name,
     })
     page.Visible = false
-    tabPages[td.name] = page
+    tabPages[td.name] = page  -- FIX: store the Frame, not the scroll
 
-    -- scrolling frame inside
+    -- Scroll frame fills the page
     local scroll = Instance.new("ScrollingFrame")
     scroll.BackgroundTransparency = 1
     scroll.BorderSizePixel        = 0
-    scroll.Size                   = UDim2.new(1,0,1,0)
-    scroll.CanvasSize             = UDim2.new(0,0,0,0)
+    scroll.Size                   = UDim2.new(1, 0, 1, 0)
+    scroll.Position               = UDim2.new(0, 0, 0, 0)
+    scroll.CanvasSize             = UDim2.new(0, 0, 0, 0)
     scroll.AutomaticCanvasSize    = Enum.AutomaticSize.Y
-    scroll.ScrollBarThickness     = 2
+    scroll.ScrollBarThickness     = 3
     scroll.ScrollBarImageColor3   = C.accentDim
-    scroll.ZIndex                 = 4
+    scroll.ZIndex                 = 3
     scroll.Parent                 = page
-    NewList(scroll, nil, Enum.HorizontalAlignment.Center, nil, 5)
+    -- Left alignment so UDim2.new(1,-12,...) items stretch correctly.
+    -- Padding of 6px each side gives 12px total margin matching the item offset.
+    NewList(scroll, nil, Enum.HorizontalAlignment.Left, nil, 5)
     NewPadding(scroll, nil, 6, 6, 8, 8)
 
-    tabPages[td.name] = scroll   -- point directly to scroll container
+    tabScrolls[td.name] = scroll  -- content helpers use this
 end
 
 -- ════════════════════════════════════════════════════════
@@ -805,7 +820,7 @@ end
 
 -- ── COMBAT ────────────────────────────────────────────
 do
-    local p = tabPages["Combat"]
+    local p = tabScrolls["Combat"]   -- FIX: use scroll container
     CreateDivider(p,   "Aim",            C.tabCombat)
     CreateToggle(p,    "Aimbot",         "Aimbot",     C.tabCombat)
     CreateToggle(p,    "Silent Aim",     "Silent",     C.tabCombat)
@@ -820,7 +835,7 @@ end
 
 -- ── MOVEMENT ──────────────────────────────────────────
 do
-    local p = tabPages["Movement"]
+    local p = tabScrolls["Movement"]   -- FIX
     CreateDivider(p,   "Speed",          C.tabMove)
     CreateToggle(p,    "Speed Boost",    "SpeedBoost", C.tabMove)
     CreateSlider(p,    "Walk Speed",     "WalkSpeed",  10,  120)
@@ -832,14 +847,14 @@ end
 
 -- ── VISUALS ───────────────────────────────────────────
 do
-    local p = tabPages["Visuals"]
+    local p = tabScrolls["Visuals"]   -- FIX
     CreateDivider(p,   "Players",        C.tabVisual)
     CreateToggle(p,    "Glow ESP",       "ESP",        C.tabVisual)
 end
 
 -- ── SETTINGS ──────────────────────────────────────────
 do
-    local p = tabPages["Settings"]
+    local p = tabScrolls["Settings"]   -- FIX
     CreateDivider(p,   "Keybinds",       C.tabSettings)
     CreateKeybind(p,   "Toggle Hub",     "ToggleKey")
     CreateDivider(p,   "Info",           C.tabSettings)
@@ -876,20 +891,21 @@ do
     AddRipple(unloadBtn)
     unloadBtn.MouseEnter:Connect(function() tw(unloadBtn, TI.fast, { BackgroundColor3 = Color3.fromRGB(230,50,50) }) end)
     unloadBtn.MouseLeave:Connect(function() tw(unloadBtn, TI.fast, { BackgroundColor3 = Color3.fromRGB(180,35,35) }) end)
+    -- FIX: Circle/Dot not yet declared here, so use a deferred callback
     unloadBtn.MouseButton1Click:Connect(function()
         S.Running = false
-        Circle:Remove(); Dot:Remove()
+        -- safely remove drawings if they exist
+        pcall(function() Circle:Remove() end)
+        pcall(function() Dot:Remove() end)
         tw(win, TI.med, { BackgroundTransparency=1 })
         tw(shadow, TI.med, { BackgroundTransparency=1 })
         task.delay(0.3, function() sg:Destroy() end)
     end)
 end
 
--- Open Combat tab by default
-SetTab("Combat")
-
 -- ════════════════════════════════════════════════════════
 --  §9  DRAWING OBJECTS  (FOV circle + crosshair dot)
+--  FIX: Declared BEFORE SetTab so unload button can reference them
 -- ════════════════════════════════════════════════════════
 local Circle = Drawing.new("Circle")
 Circle.Thickness    = 1.5
@@ -905,6 +921,9 @@ Dot.Thickness   = 1
 Dot.Color       = Color3.fromRGB(255, 255, 255)
 Dot.Filled      = true
 Dot.Visible     = false
+
+-- FIX: Open Combat tab AFTER all content populated + Drawing objects declared
+SetTab("Combat")
 
 -- ════════════════════════════════════════════════════════
 --  §10  TOGGLE HUB VISIBILITY (keybind)
