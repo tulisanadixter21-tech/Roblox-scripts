@@ -1,19 +1,21 @@
 --[[ 
-    MASTER HUB V14.2 | FULL COMPLETE SOURCE
-    Optimized: Fast Hooking & Minified Logic
+    MASTER HUB V14.4 | FULL COMPLETE SOURCE
+    Fixed: "Nil Value" Crash on Line 61
+    Method: Stable Camera-Offset (No Hooking Required)
 ]]
 
 local S = {Aimbot = false, Silent = true, ESP = false, TeamCheck = true, Fly = false, Smooth = 0.95, FOV = 180, Speed = 75, Running = true}
 local P, RS, UIS = game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService")
 local LP, Cam, CG = P.LocalPlayer, workspace.CurrentCamera, game:GetService("CoreGui")
 
+-- 1. CLEANUP
 if CG:FindFirstChild("MasterHub") then CG.MasterHub:Destroy() end
 
--- --- 1. VISUALS (FOV) ---
+-- 2. FOV VISUAL
 local Circle = Drawing.new("Circle")
 Circle.Thickness = 2; Circle.Color = Color3.fromRGB(0, 255, 150); Circle.Visible = false; Circle.Transparency = 1
 
--- --- 2. TARGETING ---
+-- 3. TARGETING
 local function GetT()
     local T, C = nil, S.FOV
     local Mid = Vector2.new(Cam.ViewportSize.X/2, Cam.ViewportSize.Y/2)
@@ -30,16 +32,7 @@ local function GetT()
     return T
 end
 
--- --- 3. SILENT AIM (FAST HOOK) ---
-local OldNC; OldNC = hookmetamethod(game, "__namecall", function(self, ...)
-    if S.Silent and getnamecallmethod() == "Raycast" then
-        local T = GetT()
-        if T then return T, T.Position, T.Normal, T.Material end
-    end
-    return OldNC(self, ...)
-end)
-
--- --- 4. UI ---
+-- 4. UI CONSTRUCTION
 local sg = Instance.new("ScreenGui", CG); sg.Name = "MasterHub"; sg.DisplayOrder = 999
 local main = Instance.new("Frame", sg); main.Size = UDim2.new(0, 160, 0, 320); main.Position = UDim2.new(0.5, -80, 0.4, 0)
 main.BackgroundColor3 = Color3.fromRGB(15, 15, 20); main.Active = true; main.Draggable = true; Instance.new("UICorner", main)
@@ -61,7 +54,7 @@ MB("✈️ FLY MODE", "Fly", Color3.fromRGB(0, 200, 100))
 MB("👥 TEAM CHECK", "TeamCheck", Color3.fromRGB(0, 150, 255))
 MB("❌ UNLOAD", nil, Color3.fromRGB(200, 0, 0), function() S.Running = false; Circle:Destroy(); sg:Destroy() end)
 
--- --- 5. ENGINE ---
+-- 5. LOOPS
 local Aiming = false
 UIS.InputBegan:Connect(function(i, p)
     if i.KeyCode == Enum.KeyCode.LeftShift then Aiming = true end
@@ -72,11 +65,18 @@ UIS.InputEnded:Connect(function(i) if i.KeyCode == Enum.KeyCode.LeftShift then A
 RS.RenderStepped:Connect(function()
     if not S.Running then return end
     Circle.Position = Vector2.new(Cam.ViewportSize.X/2, Cam.ViewportSize.Y/2)
-    Circle.Radius = S.FOV; Circle.Visible = S.Aimbot or S.Silent
-    if S.Aimbot and Aiming then
-        local T = GetT()
-        if T then Cam.CFrame = Cam.CFrame:Lerp(CFrame.new(Cam.CFrame.Position, T.Position), S.Smooth) end
+    Circle.Radius = S.FOV; Circle.Visible = (S.Aimbot or S.Silent)
+    
+    local T = GetT()
+    
+    -- Silent Aim (Instant snap when shooting/ready)
+    if S.Silent and T and Aiming then
+         Cam.CFrame = CFrame.new(Cam.CFrame.Position, T.Position)
+    -- Regular Aimbot (Smooth)
+    elseif S.Aimbot and T and Aiming then
+        Cam.CFrame = Cam.CFrame:Lerp(CFrame.new(Cam.CFrame.Position, T.Position), S.Smooth)
     end
+    
     if S.Fly and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
         local hrp, v = LP.Character.HumanoidRootPart, Vector3.new(0,0,0)
         if UIS:IsKeyDown("W") then v = v + Cam.CFrame.LookVector end
@@ -85,7 +85,7 @@ RS.RenderStepped:Connect(function()
     end
 end)
 
--- --- 6. ESP ---
+-- 6. ESP
 local function AddESP(p)
     local function CreateH()
         if p.Character then
@@ -104,3 +104,5 @@ local function AddESP(p)
 end
 for _, v in pairs(P:GetPlayers()) do if v ~= LP then AddESP(v) end end
 P.PlayerAdded:Connect(AddESP)
+
+print("Master Hub v14.4: Loaded Safely!")
