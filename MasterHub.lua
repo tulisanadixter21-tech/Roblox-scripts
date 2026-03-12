@@ -1,7 +1,7 @@
 --[[ 
-    MASTER HUB UNIVERSAL v2.4
+    MASTER HUB UNIVERSAL v2.1 (FIXED)
     - RIVALS: PROTECTED (Aimbot, Silent, ESP, Hitbox, Recoil, Reload)
-    - BLOX FRUITS: Tween Auto-Farm, Auto-Quest (Remotes), Fixed Bring Mobs
+    - BLOX FRUITS: Auto-Quest (Fixed Remotes), Auto-Farm, Fixed Bring Mobs
     - UNIVERSAL: Draggable UI, Fly, Speed, Inf Jump
 ]]
 
@@ -17,31 +17,32 @@ elseif PlaceId == 2753915549 or PlaceId == 4442272183 or PlaceId == 7449423635 t
 -- 2. MASTER SETTINGS
 local S = {
     Running = true, Fly = false, SpeedBoost = false, InfJump = true,
-    -- RIVALS (FULLY PROTECTED)
+    -- RIVALS (UNTOUCHED - PROTECTED)
     Aimbot = false, Silent = false, ESP = false, TeamCheck = true, Hitbox = false, 
     FOV = 180, Smooth = 0.9, NoRecoil = false, AutoReload = false,
     -- BLOX FRUITS
-    AutoFarm = false, BringMobs = false, AutoClick = true -- Smart Click
+    AutoFarm = false, BringMobs = false
 }
 
 if CG:FindFirstChild("MasterHub") then CG.MasterHub:Destroy() end
 
--- 3. TWEEN FUNCTION (For Blox Fruits)
+-- 3. TWEEN FUNCTION (For smooth travel)
 local function TweenTo(targetCFrame)
     if not LP.Character or not LP.Character:FindFirstChild("HumanoidRootPart") then return end
     local dist = (LP.Character.HumanoidRootPart.Position - targetCFrame.Position).Magnitude
-    local tween = TS:Create(LP.Character.HumanoidRootPart, TweenInfo.new(dist/250, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
+    local speed = 300 -- Fast but safe
+    local tween = TS:Create(LP.Character.HumanoidRootPart, TweenInfo.new(dist/speed, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
     tween:Play()
     return tween
 end
 
--- 4. RIVALS VISUALS (FOV & CROSSHAIR)
+-- 4. RIVALS VISUALS
 local Circle = Drawing.new("Circle")
 Circle.Thickness = 2; Circle.Color = Color3.fromRGB(0, 255, 150); Circle.Visible = false; Circle.Transparency = 1
 local Dot = Drawing.new("Circle")
 Dot.Radius = 2; Dot.Thickness = 1; Dot.Color = Color3.fromRGB(255, 255, 255); Dot.Filled = true; Dot.Visible = false
 
--- 5. COMBAT UTILS (Rivals)
+-- 5. UTILS (Rivals)
 local function GetScaledFOV() return (S.FOV / Cam.FieldOfView) * 70 end
 local function GetT()
     local T, C = nil, GetScaledFOV()
@@ -94,11 +95,11 @@ MB("⚡ SPEED", "SpeedBoost", Color3.fromRGB(0, 200, 255))
 MB("✈️ FLY", "Fly", Color3.fromRGB(100, 100, 100))
 MB("❌ UNLOAD", nil, Color3.fromRGB(150, 0, 0), function() S.Running = false; Circle:Destroy(); Dot:Destroy(); sg:Destroy() end)
 
--- 8. ENGINE
+-- 8. THE ENGINE
 RS.RenderStepped:Connect(function()
     if not S.Running then return end
     
-    -- --- RIVALS LOGIC (UNCHANGED) ---
+    -- --- RIVALS (UNTOUCHED) ---
     if GameMode == "Rivals" then
         local T = GetT(); Circle.Position = Vector2.new(Cam.ViewportSize.X/2, Cam.ViewportSize.Y/2); Circle.Radius = GetScaledFOV(); Circle.Visible = (S.Aimbot or S.Silent); Dot.Position = Circle.Position; Dot.Visible = Circle.Visible; Circle.Color = T and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(0, 255, 150)
         if Aiming and T then if S.Silent then Cam.CFrame = CFrame.new(Cam.CFrame.Position, T.Position) elseif S.Aimbot then Cam.CFrame = Cam.CFrame:Lerp(CFrame.new(Cam.CFrame.Position, T.Position), S.Smooth) end end
@@ -106,45 +107,56 @@ RS.RenderStepped:Connect(function()
         if S.Hitbox then for _, v in pairs(P:GetPlayers()) do if v ~= LP and v.Character and v.Character:FindFirstChild("Head") then v.Character.Head.Size = Vector3.new(3.5,3.5,3.5); v.Character.Head.CanCollide = false end end end
     end
 
-    -- --- BLOX FRUITS LOGIC ---
+    -- --- BLOX FRUITS (FORCE QUEST FIX) ---
     if GameMode == "BloxFruits" and S.AutoFarm then
-        -- 1. Auto Click & Equip
+        -- Auto Clicker
         game:GetService("VirtualUser"):CaptureController(); game:GetService("VirtualUser"):Button1Down(Vector2.new(851, 158), Cam.CFrame)
+        -- Auto Tool
         if not LP.Character:FindFirstChildOfClass("Tool") then
             for _, v in pairs(LP.Backpack:GetChildren()) do if v:IsA("Tool") and (v.ToolTip == "Melee" or v.ToolTip == "Sword") then LP.Character.Humanoid:EquipTool(v) break end end
         end
 
-        -- 2. Quest Logic (Remote)
         local MyLevel = LP.Data.Level.Value
-        local QuestName, QuestNPC, MobName = "BanditQuest1", "Quest Giver", "Bandit"
-        if MyLevel >= 10 then QuestName, QuestNPC, MobName = "MonkeyQuest1", "Monkey Quest Giver", "Monkey" end
+        local QuestRemote = game:GetService("ReplicatedStorage").Remotes.CommF_
+        
+        -- Logic to determine quest based on level
+        local qName, qNPC, mName = "BanditQuest1", "Quest Giver", "Bandit"
+        if MyLevel >= 10 and MyLevel < 15 then qName, qNPC, mName = "MonkeyQuest1", "Monkey Quest Giver", "Monkey"
+        elseif MyLevel >= 15 and MyLevel < 30 then qName, qNPC, mName = "GorillaQuest1", "Monkey Quest Giver", "Gorilla"
+        end
 
-        if not LP.PlayerGui.Main:FindFirstChild("Quest") then -- If no quest
-            local NPC = workspace.NPCs:FindFirstChild(QuestNPC)
-            if NPC then TweenTo(NPC.HumanoidRootPart.CFrame)
-                game:GetService("ReplicatedStorage").Remotes.CommF_:InvokeServer("StartQuest", QuestName, 1)
+        -- Check if already have a quest
+        local hasQuest = LP.PlayerGui.Main.Quest.Visible
+        if not hasQuest then
+            -- Fly to NPC and force quest
+            local npcObj = workspace.NPCs:FindFirstChild(qNPC) or workspace:FindFirstChild(qNPC)
+            if npcObj then
+                TweenTo(npcObj.HumanoidRootPart.CFrame * CFrame.new(0,0,2))
+                QuestRemote:InvokeServer("StartQuest", qName, 1)
             end
         else
-            -- 3. Farm Logic
-            local target = nil
+            -- Already have quest, go to mobs
+            local targetMob = nil
             for _, v in pairs(workspace.Enemies:GetChildren()) do
-                if v.Name:find(MobName) and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then target = v break end
+                if v.Name:find(mName) and v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 then
+                    targetMob = v; break
+                end
             end
-            
-            if target then
-                LP.Character.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame * CFrame.new(0, 8, 0)
+
+            if targetMob then
+                LP.Character.HumanoidRootPart.CFrame = targetMob.HumanoidRootPart.CFrame * CFrame.new(0, 8, 0)
                 if S.BringMobs then
                     for _, v in pairs(workspace.Enemies:GetChildren()) do
-                        if v.Name:find(MobName) and v:FindFirstChild("HumanoidRootPart") then
-                            v.HumanoidRootPart.CFrame = target.HumanoidRootPart.CFrame
+                        if v.Name:find(mName) and v:FindFirstChild("HumanoidRootPart") then
+                            v.HumanoidRootPart.CFrame = targetMob.HumanoidRootPart.CFrame
                             v.HumanoidRootPart.CanCollide = false
                         end
                     end
                 end
             else
-                -- If quest active but no mobs nearby, go to mob spawn
-                local Spawn = workspace.EnemySpawns:FindFirstChild(MobName)
-                if Spawn then TweenTo(Spawn.CFrame) end
+                -- Go to spawn if no mobs found
+                local spawner = workspace.EnemySpawns:FindFirstChild(mName)
+                if spawner then TweenTo(spawner.CFrame * CFrame.new(0, 20, 0)) end
             end
         end
     end
