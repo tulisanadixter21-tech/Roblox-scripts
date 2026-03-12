@@ -1,9 +1,7 @@
 --[[ 
-    MASTER HUB V8.8 - FINAL STABILITY
-    Keybinds:
-    - Hold L-SHIFT or RIGHT-CLICK: Aimbot Lock
-    - Tap INSERT: Toggle Menu Visibility
-    - Tap R-SHIFT: Self-Destruct (Clears everything)
+    MASTER HUB V9.0 - THE RIVALS PERFORMANCE UPDATE
+    - Hold L-SHIFT / Right-Click: Lock Target
+    - Insert: Toggle Menu | Right-Shift: Self-Destruct
 ]]
 
 local Settings = {
@@ -11,69 +9,40 @@ local Settings = {
     ESP = false,
     TeamCheck = true,
     Fly = false,
-    Smoothness = 0.12,
-    AimPart = "Head",
-    FlySpeed = 55,
-    Running = true,
-    Visible = true
+    -- Performance Tunings
+    Smoothness = 0.65, -- Cranked for fast movement
+    FOV = 150,        -- The radius of the aimbot circle
+    FlySpeed = 65,
+    Running = true
 }
 
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
+local Mouse = LP:GetMouse()
+local Camera = workspace.CurrentCamera
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local Camera = workspace.CurrentCamera
 
--- --- 1. BYPASS INPUT HANDLER ---
-local IsAiming = false
-UIS.InputBegan:Connect(function(input, processed)
-    -- We ignore 'processed' so we see the key even if the game is using it for sprinting
-    if input.KeyCode == Enum.KeyCode.LeftShift or input.UserInputType == Enum.UserInputType.MouseButton2 then
-        IsAiming = true
-    end
-end)
+-- --- 1. THE FOV CIRCLE ---
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 1.5; FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+FOVCircle.Filled = false; FOVCircle.Transparency = 0.7; FOVCircle.Visible = false
 
-UIS.InputEnded:Connect(function(input)
-    if input.KeyCode == Enum.KeyCode.LeftShift or input.UserInputType == Enum.UserInputType.MouseButton2 then
-        IsAiming = false
-    end
-end)
-
--- --- 2. THE UNLOAD SYSTEM ---
-local function UnloadScript()
-    Settings.Running = false
-    Settings.Aimbot = false
-    Settings.ESP = false
-    
-    -- Clear ESP Highlights
-    for _, v in pairs(Players:GetPlayers()) do
-        if v.Character and v.Character:FindFirstChild("HubHighlight") then
-            v.Character.HubHighlight:Destroy()
-        end
-    end
-    
-    -- Delete UI
-    if game:GetService("CoreGui"):FindFirstChild("MasterHub") then
-        game:GetService("CoreGui").MasterHub:Destroy()
-    end
-    print("Master Hub: Unloaded Successfully")
-end
-
--- --- 3. TARGETING ENGINE ---
-local function GetTarget()
-    local Target, Closest = nil, 600
+-- --- 2. TARGET ACQUISITION ---
+local function GetClosestTarget()
+    local Target, Closest = nil, Settings.FOV
     for _, v in pairs(Players:GetPlayers()) do
         if v ~= LP and v.Character then
-            -- Team Check Logic
+            -- Bypass team check for FFA
             if Settings.TeamCheck and (v.Team == LP.Team or v.TeamColor == LP.TeamColor) then continue end
             
-            -- Rivals Brute Force Search
-            local AimPart = v.Character:FindFirstChild("Head") or v.Character:FindFirstChild("UpperTorso") or v.Character:FindFirstChild("HumanoidRootPart")
-            if AimPart then
-                local pos, onScreen = Camera:WorldToViewportPoint(AimPart.Position)
+            -- Priority: Head -> Torso
+            local Part = v.Character:FindFirstChild("Head") or v.Character:FindFirstChild("UpperTorso")
+            if Part then
+                local pos, onScreen = Camera:WorldToViewportPoint(Part.Position)
                 if onScreen then
                     local dist = (Vector2.new(pos.X, pos.Y) - UIS:GetMouseLocation()).Magnitude
-                    if dist < Closest then Closest = dist; Target = AimPart end
+                    if dist < Closest then Closest = dist; Target = Part end
                 end
             end
         end
@@ -81,21 +50,59 @@ local function GetTarget()
     return Target
 end
 
--- --- 4. GLOW ESP ---
+-- --- 3. MAIN ENGINE ---
+local IsAiming = false
+UIS.InputBegan:Connect(function(i) 
+    if i.KeyCode == Enum.KeyCode.LeftShift or i.UserInputType == Enum.UserInputType.MouseButton2 then IsAiming = true end 
+end)
+UIS.InputEnded:Connect(function(i) 
+    if i.KeyCode == Enum.KeyCode.LeftShift or i.UserInputType == Enum.UserInputType.MouseButton2 then IsAiming = false end 
+end)
+
+RunService.RenderStepped:Connect(function()
+    if not Settings.Running then return end
+    
+    -- Update FOV Circle Position
+    FOVCircle.Position = UIS:GetMouseLocation()
+    FOVCircle.Radius = Settings.FOV
+    FOVCircle.Visible = Settings.Aimbot
+
+    if Settings.Aimbot and IsAiming then
+        local T = GetClosestTarget()
+        if T then
+            Camera.CFrame = Camera.CFrame:Lerp(CFrame.new(Camera.CFrame.Position, T.Position), Settings.Smoothness)
+        end
+    end
+    
+    -- Fly Movement
+    if Settings.Fly and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
+        local hrp = LP.Character.HumanoidRootPart
+        local vec = Vector3.new(0,0,0)
+        if UIS:IsKeyDown(Enum.KeyCode.W) then vec = vec + Camera.CFrame.LookVector end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then vec = vec - Camera.CFrame.LookVector end
+        hrp.Velocity = (vec * Settings.FlySpeed) + Vector3.new(0, 1.5, 0)
+    end
+end)
+
+-- --- 4. GLOW ESP & SELF-DESTRUCT ---
+local function Unload()
+    Settings.Running = false; Settings.Aimbot = false; Settings.ESP = false
+    FOVCircle:Destroy()
+    for _, v in pairs(Players:GetPlayers()) do
+        if v.Character and v.Character:FindFirstChild("HubHighlight") then v.Character.HubHighlight:Destroy() end
+    end
+    if game:GetService("CoreGui"):FindFirstChild("MasterHub") then game:GetService("CoreGui").MasterHub:Destroy() end
+end
+
 local function ApplyESP(plr)
     local function Update()
-        if plr == LP then return end
+        if plr == LP or not Settings.Running then return end
         local char = plr.Character or plr.CharacterAdded:Wait()
-        local h = char:FindFirstChild("HubHighlight") or Instance.new("Highlight")
-        h.Name = "HubHighlight"; h.Parent = char
-        h.FillColor = Color3.fromRGB(255, 0, 0); h.OutlineColor = Color3.new(1,1,1)
-        
+        local h = char:FindFirstChild("HubHighlight") or Instance.new("Highlight", char)
+        h.Name = "HubHighlight"; h.FillColor = Color3.fromRGB(255, 0, 0)
         RunService.Heartbeat:Connect(function()
             if h.Parent and Settings.Running then
-                local isEnemy = not Settings.TeamCheck or (plr.Team ~= LP.Team)
-                h.Enabled = Settings.ESP and isEnemy
-            elseif not Settings.Running then
-                h:Destroy()
+                h.Enabled = Settings.ESP and (not Settings.TeamCheck or plr.Team ~= LP.Team)
             end
         end)
     end
@@ -104,29 +111,7 @@ end
 for _, v in pairs(Players:GetPlayers()) do ApplyESP(v) end
 Players.PlayerAdded:Connect(ApplyESP)
 
--- --- 5. MAIN LOOP ---
-RunService.RenderStepped:Connect(function()
-    if not Settings.Running then return end
-
-    -- Aimbot Smooth Lock
-    if Settings.Aimbot and IsAiming then
-        local T = GetTarget()
-        if T then
-            local lookAt = CFrame.new(Camera.CFrame.Position, T.Position)
-            Camera.CFrame = Camera.CFrame:Lerp(lookAt, Settings.Smoothness)
-        end
-    end
-
-    -- Flight
-    if Settings.Fly and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
-        local vec = Vector3.new(0,0,0)
-        if UIS:IsKeyDown(Enum.KeyCode.W) then vec = vec + Camera.CFrame.LookVector end
-        if UIS:IsKeyDown(Enum.KeyCode.S) then vec = vec - Camera.CFrame.LookVector end
-        LP.Character.HumanoidRootPart.Velocity = (vec * Settings.FlySpeed) + Vector3.new(0,1.5,0)
-    end
-end)
-
--- --- 6. UI CONSTRUCTION ---
+-- --- 5. THE UI ---
 local sg = Instance.new("ScreenGui", game:GetService("CoreGui")); sg.Name = "MasterHub"
 local main = Instance.new("Frame", sg)
 main.Size = UDim2.new(0, 180, 0, 320); main.Position = UDim2.new(0, 50, 0, 50)
@@ -150,11 +135,10 @@ MakeBtn("🎯 AIMBOT", "Aimbot", Color3.fromRGB(255, 140, 0))
 MakeBtn("👁️ GLOW ESP", "ESP", Color3.fromRGB(255, 50, 50))
 MakeBtn("✈️ FLY MODE", "Fly", Color3.fromRGB(0, 200, 100))
 MakeBtn("👥 TEAM CHECK", "TeamCheck", Color3.fromRGB(0, 150, 255))
-MakeBtn("❌ SELF-DESTRUCT", nil, Color3.fromRGB(200, 0, 0), UnloadScript)
+MakeBtn("❌ SELF-DESTRUCT", nil, Color3.fromRGB(200, 0, 0), Unload)
 
--- Global Controls
 UIS.InputBegan:Connect(function(i, p)
     if p then return end
-    if i.KeyCode == Enum.KeyCode.RightShift then UnloadScript()
-    elseif i.KeyCode == Enum.KeyCode.Insert then Settings.Visible = not Settings.Visible; main.Visible = Settings.Visible end
+    if i.KeyCode == Enum.KeyCode.RightShift then Unload()
+    elseif i.KeyCode == Enum.KeyCode.Insert then main.Visible = not main.Visible end
 end)
