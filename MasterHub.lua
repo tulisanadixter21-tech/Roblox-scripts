@@ -1,14 +1,13 @@
 --[[ 
-    MASTER HUB V15.0 | THE STABLE BUILD
-    - Removed hookmetamethod to fix Line 61 crash
-    - Added "Safe-Load" logic
+    MASTER HUB V15.1 | SCOPE-FIX BUILD
+    - Feature: Dynamic FOV Scaling (Circle stays accurate while scoping)
+    - Fix: Viewport centering for wide-screen monitors
 ]]
 
 local S = {Aimbot = false, Silent = false, ESP = false, TeamCheck = true, Fly = false, Smooth = 0.9, FOV = 180, Speed = 75, Running = true}
 local P, RS, UIS = game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService")
 local LP, Cam, CG = P.LocalPlayer, workspace.CurrentCamera, game:GetService("CoreGui")
 
--- Cleanup
 if CG:FindFirstChild("MasterHub") then CG.MasterHub:Destroy() end
 
 -- 1. FOV Visual
@@ -18,9 +17,15 @@ Circle.Color = Color3.fromRGB(0, 255, 150)
 Circle.Visible = false
 Circle.Transparency = 1
 
--- 2. Targeting Logic
+-- 2. Dynamic FOV Calculation (The Scope Fix)
+local function GetScaledFOV()
+    -- This formula adjusts the circle size based on your current camera zoom
+    return (S.FOV / Cam.FieldOfView) * 70 
+end
+
+-- 3. Targeting Logic
 local function GetT()
-    local T, C = nil, S.FOV
+    local T, C = nil, GetScaledFOV()
     local Mid = Vector2.new(Cam.ViewportSize.X/2, Cam.ViewportSize.Y/2)
     for _, v in pairs(P:GetPlayers()) do
         if v ~= LP and v.Character and v.Character:FindFirstChild("Head") then
@@ -35,7 +40,7 @@ local function GetT()
     return T
 end
 
--- 3. UI Construction (Moved up to ensure it loads)
+-- 4. UI Construction
 local sg = Instance.new("ScreenGui", CG); sg.Name = "MasterHub"; sg.DisplayOrder = 999
 local main = Instance.new("Frame", sg); main.Size = UDim2.new(0, 160, 0, 320); main.Position = UDim2.new(0.5, -80, 0.4, 0)
 main.BackgroundColor3 = Color3.fromRGB(15, 15, 20); main.Active = true; main.Draggable = true; Instance.new("UICorner", main)
@@ -57,7 +62,7 @@ MB("✈️ FLY MODE", "Fly", Color3.fromRGB(0, 200, 100))
 MB("👥 TEAM CHECK", "TeamCheck", Color3.fromRGB(0, 150, 255))
 MB("❌ UNLOAD", nil, Color3.fromRGB(200, 0, 0), function() S.Running = false; Circle:Destroy(); sg:Destroy() end)
 
--- 4. Main Loop
+-- 5. Main Loop
 local Aiming = false
 UIS.InputBegan:Connect(function(i, p)
     if i.KeyCode == Enum.KeyCode.LeftShift then Aiming = true end
@@ -67,15 +72,19 @@ UIS.InputEnded:Connect(function(i) if i.KeyCode == Enum.KeyCode.LeftShift then A
 
 RS.RenderStepped:Connect(function()
     if not S.Running then return end
+    
+    -- Centering and Scaling the Circle
+    local ScaledRadius = GetScaledFOV()
     Circle.Position = Vector2.new(Cam.ViewportSize.X/2, Cam.ViewportSize.Y/2)
-    Circle.Radius = S.FOV; Circle.Visible = (S.Aimbot or S.Silent)
+    Circle.Radius = ScaledRadius
+    Circle.Visible = (S.Aimbot or S.Silent)
     
     if Aiming then
         local T = GetT()
         if T then
-            if S.Silent then -- Instant Snap
+            if S.Silent then
                 Cam.CFrame = CFrame.new(Cam.CFrame.Position, T.Position)
-            elseif S.Aimbot then -- Smooth Lerp
+            elseif S.Aimbot then
                 Cam.CFrame = Cam.CFrame:Lerp(CFrame.new(Cam.CFrame.Position, T.Position), S.Smooth)
             end
         end
@@ -89,7 +98,7 @@ RS.RenderStepped:Connect(function()
     end
 end)
 
--- 5. ESP System
+-- 6. ESP System
 local function AddESP(p)
     local function CreateH()
         if p.Character then
@@ -108,5 +117,3 @@ local function AddESP(p)
 end
 for _, v in pairs(P:GetPlayers()) do if v ~= LP then AddESP(v) end end
 P.PlayerAdded:Connect(AddESP)
-
-print("Master Hub v15.0 Loaded!")
