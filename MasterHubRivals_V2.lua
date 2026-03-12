@@ -97,19 +97,47 @@ local function GetScaledFOV()
     return (S.FOV / Cam.FieldOfView) * 70
 end
 
+-- ── IsAlive: true only if the player has a living character in workspace
+--   Fixes: dead ragdolls targeted (Health=0), unloaded characters targeted
+local function IsAlive(player)
+    local char = player.Character
+    if not char then return false end
+    -- Must be parented to workspace (not a cached ragdoll elsewhere)
+    if char.Parent ~= workspace then return false end
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    if not hum or hum.Health <= 0 then return false end
+    return true
+end
+
+-- ── IsEnemy: true only if player is a valid, living enemy
+--   Fixes: team-mates targeted when TeamCheck=true,
+--          nil-team edge case (both nil → nil==nil → true → wrongly skipped)
+local function IsEnemy(player)
+    if player == LP then return false end
+    if not IsAlive(player) then return false end
+    if S.TeamCheck then
+        -- Only skip if BOTH teams are non-nil AND they actually match.
+        -- If either team is nil (loading/unassigned) treat as enemy to be safe.
+        local myTeam     = LP.Team
+        local theirTeam  = player.Team
+        if myTeam ~= nil and theirTeam ~= nil and theirTeam == myTeam then
+            return false   -- same real team → not an enemy
+        end
+    end
+    return true
+end
+
 local function GetTarget()
     local best, bestDist = nil, GetScaledFOV()
     local mid = Vector2.new(Cam.ViewportSize.X / 2, Cam.ViewportSize.Y / 2)
     for _, v in ipairs(Players:GetPlayers()) do
-        if v ~= LP and v.Character then
-            local head = v.Character:FindFirstChild("Head")
-            if head then
-                if S.TeamCheck and v.Team == LP.Team then continue end
-                local pos, vis = Cam:WorldToViewportPoint(head.Position)
-                if vis then
-                    local d = (Vector2.new(pos.X, pos.Y) - mid).Magnitude
-                    if d < bestDist then bestDist = d; best = head end
-                end
+        if not IsEnemy(v) then continue end
+        local head = v.Character:FindFirstChild("Head")
+        if head then
+            local pos, vis = Cam:WorldToViewportPoint(head.Position)
+            if vis then
+                local d = (Vector2.new(pos.X, pos.Y) - mid).Magnitude
+                if d < bestDist then bestDist = d; best = head end
             end
         end
     end
@@ -858,7 +886,7 @@ do
     CreateDivider(p,   "Keybinds",       C.tabSettings)
     CreateKeybind(p,   "Toggle Hub",     "ToggleKey")
     CreateDivider(p,   "Info",           C.tabSettings)
-    local _, versionVal  = CreateInfo(p, "Version",  "v2.0")
+    local _, versionVal  = CreateInfo(p, "Version",  "v2.1 (team+dead fix)")
     local _, playerVal   = CreateInfo(p, "Player",   LP.Name)
     local _, fpsVal      = CreateInfo(p, "FPS",      "0")
 
@@ -1015,10 +1043,10 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- ── Hitbox expansion
+    -- ── Hitbox expansion (enemies + alive only — fixes dead body + team bug)
     if S.Hitbox then
         for _, v in ipairs(Players:GetPlayers()) do
-            if v ~= LP and v.Character then
+            if IsEnemy(v) then
                 local head = v.Character:FindFirstChild("Head")
                 if head then
                     head.Size       = Vector3.new(3.5, 3.5, 3.5)
@@ -1033,27 +1061,68 @@ end)
 --  §12  ESP MODULE
 -- ════════════════════════════════════════════════════════
 local function AddESP(player)
+    --[[
+        FIX [2] — ESP disappears when TeamCheck ON:
+            Old code: h.Enabled = S.ESP and (not S.TeamCheck or player.Team ~= LP.Team)
+            Bug:      When TeamCheck=true and player is ally → Enabled=false, correct.
+                      But also when TeamCheck=true and player IS enemy → condition was
+                      relying on broken team comparison (see IsEnemy fix), so allies
+                      sometimes evaluated as enemies and vice versa.
+            Fix:      Use IsEnemy() which handles nil-team edge case properly.
+                      When TeamCheck=OFF  → show all living players (coloured by team).
+                      When TeamCheck=ON   → show only living enemies.
+
+        FIX [3] — Dead bodies highlighted:
+            Rivals keeps the character model in workspace after death (ragdoll).
+            Old code had no health check so the Highlight stayed on dead bodies.
+            Fix: gate h.Enabled on IsAlive(player) every poll tick.
+    --]]
     local function CreateHighlight()
         if not player.Character then return end
+
+        -- Remove stale highlight from previous life if it exists
         local existing = player.Character:FindFirstChild("MH_ESP")
-        local h = existing or Instance.new("Highlight", player.Character)
-        h.Name         = "MH_ESP"
-        h.FillColor    = Color3.fromRGB(220, 40, 40)
-        h.OutlineColor = Color3.fromRGB(255, 255, 255)
+        if existing then existing:Destroy() end
+
+        local h = Instance.new("Highlight")
+        h.Name                = "MH_ESP"
+        h.OutlineColor        = Color3.fromRGB(255, 255, 255)
         h.FillTransparency    = 0.5
         h.OutlineTransparency = 0
+        h.Enabled             = false   -- start hidden, loop below decides
+        h.Parent              = player.Character
 
         task.spawn(function()
-            while player.Character and h.Parent and S.Running do
-                local shouldShow = S.ESP and (not S.TeamCheck or player.Team ~= LP.Team)
-                h.Enabled = shouldShow
-                task.wait(0.2)
+            while h.Parent and S.Running do
+                local alive   = IsAlive(player)       -- FIX [3]: skip dead bodies
+                local isEnemy = IsEnemy(player)        -- FIX [2]: correct team logic
+
+                if not S.ESP or not alive then
+                    -- ESP off OR player is dead → always hide
+                    h.Enabled = false
+                elseif S.TeamCheck then
+                    -- TeamCheck ON  → show only enemies
+                    h.Enabled = isEnemy
+                else
+                    -- TeamCheck OFF → show everyone alive
+                    h.Enabled = true
+                end
+
+                -- Colour: red = enemy, blue = teammate
+                if h.Enabled then
+                    h.FillColor = isEnemy
+                        and Color3.fromRGB(220, 40,  40)
+                        or  Color3.fromRGB(40,  120, 220)
+                end
+
+                task.wait(0.15)
             end
         end)
     end
 
+    -- Re-create highlight on every respawn
     player.CharacterAdded:Connect(function()
-        task.wait(0.6)
+        task.wait(0.5)
         CreateHighlight()
     end)
     CreateHighlight()
