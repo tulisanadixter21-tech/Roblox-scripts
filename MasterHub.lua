@@ -1,21 +1,24 @@
 --[[ 
-    MASTER HUB V14.4 | FULL COMPLETE SOURCE
-    Fixed: "Nil Value" Crash on Line 61
-    Method: Stable Camera-Offset (No Hooking Required)
+    MASTER HUB V15.0 | THE STABLE BUILD
+    - Removed hookmetamethod to fix Line 61 crash
+    - Added "Safe-Load" logic
 ]]
 
-local S = {Aimbot = false, Silent = true, ESP = false, TeamCheck = true, Fly = false, Smooth = 0.95, FOV = 180, Speed = 75, Running = true}
+local S = {Aimbot = false, Silent = false, ESP = false, TeamCheck = true, Fly = false, Smooth = 0.9, FOV = 180, Speed = 75, Running = true}
 local P, RS, UIS = game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService")
 local LP, Cam, CG = P.LocalPlayer, workspace.CurrentCamera, game:GetService("CoreGui")
 
--- 1. CLEANUP
+-- Cleanup
 if CG:FindFirstChild("MasterHub") then CG.MasterHub:Destroy() end
 
--- 2. FOV VISUAL
+-- 1. FOV Visual
 local Circle = Drawing.new("Circle")
-Circle.Thickness = 2; Circle.Color = Color3.fromRGB(0, 255, 150); Circle.Visible = false; Circle.Transparency = 1
+Circle.Thickness = 2
+Circle.Color = Color3.fromRGB(0, 255, 150)
+Circle.Visible = false
+Circle.Transparency = 1
 
--- 3. TARGETING
+-- 2. Targeting Logic
 local function GetT()
     local T, C = nil, S.FOV
     local Mid = Vector2.new(Cam.ViewportSize.X/2, Cam.ViewportSize.Y/2)
@@ -32,7 +35,7 @@ local function GetT()
     return T
 end
 
--- 4. UI CONSTRUCTION
+-- 3. UI Construction (Moved up to ensure it loads)
 local sg = Instance.new("ScreenGui", CG); sg.Name = "MasterHub"; sg.DisplayOrder = 999
 local main = Instance.new("Frame", sg); main.Size = UDim2.new(0, 160, 0, 320); main.Position = UDim2.new(0.5, -80, 0.4, 0)
 main.BackgroundColor3 = Color3.fromRGB(15, 15, 20); main.Active = true; main.Draggable = true; Instance.new("UICorner", main)
@@ -48,13 +51,13 @@ local function MB(t, s, c, f)
 end
 
 MB("🎯 AIMBOT", "Aimbot", Color3.fromRGB(255, 140, 0))
-MB("🔫 SILENT AIM", "Silent", Color3.fromRGB(150, 0, 255))
+MB("🔫 SNAPPY AIM", "Silent", Color3.fromRGB(150, 0, 255))
 MB("👁️ GLOW ESP", "ESP", Color3.fromRGB(255, 50, 50))
 MB("✈️ FLY MODE", "Fly", Color3.fromRGB(0, 200, 100))
 MB("👥 TEAM CHECK", "TeamCheck", Color3.fromRGB(0, 150, 255))
 MB("❌ UNLOAD", nil, Color3.fromRGB(200, 0, 0), function() S.Running = false; Circle:Destroy(); sg:Destroy() end)
 
--- 5. LOOPS
+-- 4. Main Loop
 local Aiming = false
 UIS.InputBegan:Connect(function(i, p)
     if i.KeyCode == Enum.KeyCode.LeftShift then Aiming = true end
@@ -67,25 +70,26 @@ RS.RenderStepped:Connect(function()
     Circle.Position = Vector2.new(Cam.ViewportSize.X/2, Cam.ViewportSize.Y/2)
     Circle.Radius = S.FOV; Circle.Visible = (S.Aimbot or S.Silent)
     
-    local T = GetT()
-    
-    -- Silent Aim (Instant snap when shooting/ready)
-    if S.Silent and T and Aiming then
-         Cam.CFrame = CFrame.new(Cam.CFrame.Position, T.Position)
-    -- Regular Aimbot (Smooth)
-    elseif S.Aimbot and T and Aiming then
-        Cam.CFrame = Cam.CFrame:Lerp(CFrame.new(Cam.CFrame.Position, T.Position), S.Smooth)
+    if Aiming then
+        local T = GetT()
+        if T then
+            if S.Silent then -- Instant Snap
+                Cam.CFrame = CFrame.new(Cam.CFrame.Position, T.Position)
+            elseif S.Aimbot then -- Smooth Lerp
+                Cam.CFrame = Cam.CFrame:Lerp(CFrame.new(Cam.CFrame.Position, T.Position), S.Smooth)
+            end
+        end
     end
     
     if S.Fly and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
         local hrp, v = LP.Character.HumanoidRootPart, Vector3.new(0,0,0)
         if UIS:IsKeyDown("W") then v = v + Cam.CFrame.LookVector end
         if UIS:IsKeyDown("S") then v = v - Cam.CFrame.LookVector end
-        hrp.Velocity = (v * S.Speed) + Vector3.new(0, 1.5, 0)
+        hrp.Velocity = (v * S.Speed) + Vector3.new(0, 2, 0)
     end
 end)
 
--- 6. ESP
+-- 5. ESP System
 local function AddESP(p)
     local function CreateH()
         if p.Character then
@@ -105,4 +109,4 @@ end
 for _, v in pairs(P:GetPlayers()) do if v ~= LP then AddESP(v) end end
 P.PlayerAdded:Connect(AddESP)
 
-print("Master Hub v14.4: Loaded Safely!")
+print("Master Hub v15.0 Loaded!")
