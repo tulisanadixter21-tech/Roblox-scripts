@@ -149,6 +149,9 @@ local C = {
     textMain = Color3.fromRGB(230, 235, 255),
     textSoft = Color3.fromRGB(180, 190, 230),
     textMuted = Color3.fromRGB(120, 130, 180),
+    
+    -- Missing white (used by toggles, sliders, crosshair, etc.)
+    white = Color3.fromRGB(255, 255, 255),
 }
 
 -- Tween presets
@@ -383,6 +386,7 @@ local tabs = {
 
 local tabButtons = {}
 local activeTab = "combat"
+local contentFrames = {} -- Forward declare so tab click handlers can reference it
 
 -- Quick actions at top
 local quickActions = {
@@ -475,7 +479,7 @@ for _, tab in ipairs(tabs) do
     
     tabButtons[tab.id] = {btn = btn, indicator = indicator, color = tab.color}
     
-    btn.MouseButton1Click:Connect(function()
+    local function switchToTab()
         activeTab = tab.id
         for id, data in pairs(tabButtons) do
             data.btn.BackgroundTransparency = id == tab.id and 0.2 or 0
@@ -486,7 +490,11 @@ for _, tab in ipairs(tabs) do
         for id, frame in pairs(contentFrames) do
             frame.Visible = (id == tab.id)
         end
-    end)
+    end
+    
+    tabButtons[tab.id].switchFn = switchToTab
+    
+    btn.MouseButton1Click:Connect(switchToTab)
 end
 
 -- ============================================
@@ -500,8 +508,6 @@ contentArea.Size = UDim2.new(1, -(IS_MOBILE and 90 or 100), 1, -55)
 contentArea.Position = UDim2.new(0, IS_MOBILE and 90 or 100, 0, 55)
 contentArea.Parent = mainWindow
 addCorner(contentArea, 0)
-
-local contentFrames = {}
 
 for _, tab in ipairs(tabs) do
     local frame = Instance.new("ScrollingFrame")
@@ -750,7 +756,7 @@ local function createDropdown(parent, text, setting, options, accentColor)
     panel.BackgroundColor3 = C.bg3
     panel.BorderSizePixel = 0
     panel.Size = UDim2.new(1, -20, 0, 0)
-    panel.Position = UDim2.new(0, 10, 0, container.Size.Y.Offset + 5)
+    panel.Position = UDim2.new(0, 10, 0, (IS_MOBILE and 70 or 60) + 5)
     panel.Visible = false
     panel.ZIndex = 50
     panel.Parent = parent
@@ -784,9 +790,15 @@ local function createDropdown(parent, text, setting, options, accentColor)
     selectBtn.MouseButton1Click:Connect(function()
         panel.Visible = not panel.Visible
         local height = #options * (IS_MOBILE and 48 or 40) + 10
-        tween(panel, TI.spring, {
-            Size = panel.Visible and UDim2.new(1, -20, 0, height) or UDim2.new(1, -20, 0, 0)
-        })
+        if panel.Visible then
+            tween(panel, TI.spring, {Size = UDim2.new(1, -20, 0, height)})
+        else
+            local closeTween = TweenService:Create(panel, TI.spring, {Size = UDim2.new(1, -20, 0, 0)})
+            closeTween.Completed:Connect(function()
+                panel.Visible = false
+            end)
+            closeTween:Play()
+        end
     end)
     
     return container
@@ -1098,7 +1110,7 @@ toggleHitbox.MouseButton1Click:Connect(function()
     tween(toggleButton, TI.spring, {
         Size = S.UIVisible and UDim2.new(0, IS_MOBILE and 60 or 50, 0, IS_MOBILE and 60 or 50) or UDim2.new(0, IS_MOBILE and 70 or 60, 0, IS_MOBILE and 70 or 60)
     })
-    toggleIcon.Text = S.UIVisible and "⚡" or "⚡"
+    toggleIcon.Text = S.UIVisible and "⚡" or "✕"
 end)
 
 -- Floating button toggle from settings
@@ -1116,7 +1128,7 @@ if IS_MOBILE then
     local touchStart = nil
     local swipeThreshold = 50
     
-    mainWindow.TouchTap:Connect(function(tap)
+    UserInputService.TouchStarted:Connect(function(tap)
         if S.GestureControls then
             touchStart = tap.Position
         end
@@ -1132,11 +1144,15 @@ if IS_MOBILE then
                     if delta > 0 and currentIdx > 1 then
                         -- Swipe right
                         local newTab = tabOrder[currentIdx - 1]
-                        tabButtons[newTab].btn.MouseButton1Click:Fire()
+                        if tabButtons[newTab] and tabButtons[newTab].switchFn then
+                            tabButtons[newTab].switchFn()
+                        end
                     elseif delta < 0 and currentIdx < #tabOrder then
                         -- Swipe left
                         local newTab = tabOrder[currentIdx + 1]
-                        tabButtons[newTab].btn.MouseButton1Click:Fire()
+                        if tabButtons[newTab] and tabButtons[newTab].switchFn then
+                            tabButtons[newTab].switchFn()
+                        end
                     end
                 end
                 touchStart = nil
@@ -1434,12 +1450,26 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- Fullbright
-if S.Fullbright then
-    game:GetService("Lighting").Brightness = 2
-    game:GetService("Lighting").GlobalShadows = false
-    game:GetService("Lighting").FogEnd = 100000
-end
+-- Fullbright (reactive)
+local Lighting = game:GetService("Lighting")
+local defaultBrightness = Lighting.Brightness
+local defaultShadows = Lighting.GlobalShadows
+local defaultFogEnd = Lighting.FogEnd
+
+task.spawn(function()
+    while sg.Parent do
+        if S.Fullbright then
+            Lighting.Brightness = 2
+            Lighting.GlobalShadows = false
+            Lighting.FogEnd = 100000
+        else
+            Lighting.Brightness = defaultBrightness
+            Lighting.GlobalShadows = defaultShadows
+            Lighting.FogEnd = defaultFogEnd
+        end
+        task.wait(0.5)
+    end
+end)
 
 -- ============================================
 print("✅ Master Hub V5 Mobile Ultimate loaded!")
