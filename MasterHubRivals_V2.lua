@@ -26,7 +26,7 @@ local S = {
     Smooth      = 60,
     Prediction  = 0,
     VisibleOnly = false,
-    TeamCheck   = true,
+    TeamCheck   = false,
     ESPBox      = false,
     ESPName     = false,
     ESPHealth   = false,
@@ -36,6 +36,8 @@ local S = {
     Hitbox      = false,
     HitboxSize  = 6,
     Crosshair   = false,
+    KillAll     = false,
+    SilentKill  = false,
 }
 
 -- ============================================================
@@ -668,7 +670,7 @@ do
     createSlider(f,  "Smoothness", "Smooth",      1, 100, "%d%%")
     createSlider(f,  "Prediction", "Prediction",  0,  20, "%d")
     createToggle(f, "Visible Only","Only visible enemies",       "VisibleOnly", C.warning)
-    createToggle(f, "Team Check",  "Skip teammates",             "TeamCheck",   C.textMuted)
+    createToggle(f, "Team Check",  "Enable for team modes only",  "TeamCheck",   C.textMuted)
 
     sectionHeader(f, "  🔫  WEAPON", C.combat)
     createToggle(f, "No Recoil",   "Remove camera recoil",      "NoRecoil",    C.combat)
@@ -694,6 +696,41 @@ end
 -- MISC TAB
 do
     local f = contentFrames["misc"]
+
+    sectionHeader(f, "  ☠  KILL ALL", C.danger)
+
+    createToggle(f, "Kill All",    "TP & shoot every enemy",        "KillAll",    C.danger)
+    createToggle(f, "Silent Kill", "Every shot auto-hits all enemies", "SilentKill", C.combat)
+
+    -- status label (updates live)
+    local killStatus = Instance.new("TextLabel")
+    killStatus.BackgroundTransparency = 1
+    killStatus.Text       = "  Status: OFF"
+    killStatus.TextColor3 = C.textMuted
+    killStatus.TextSize   = 12
+    killStatus.Font       = Enum.Font.GothamBold
+    killStatus.Size       = UDim2.new(1, -10, 0, 22)
+    killStatus.TextXAlignment = Enum.TextXAlignment.Left
+    killStatus.Parent     = f
+
+    task.spawn(function()
+        while sg.Parent do
+            if S.KillAll and S.SilentKill then
+                killStatus.Text       = "  Status: 🔴 SILENT HUNTING..."
+                killStatus.TextColor3 = C.combat
+            elseif S.KillAll then
+                killStatus.Text       = "  Status: 🔴 HUNTING..."
+                killStatus.TextColor3 = C.danger
+            elseif S.SilentKill then
+                killStatus.Text       = "  Status: ⚡ SILENT KILL ACTIVE"
+                killStatus.TextColor3 = C.combat
+            else
+                killStatus.Text       = "  Status: OFF"
+                killStatus.TextColor3 = C.textMuted
+            end
+            task.wait(0.2)
+        end
+    end)
 
     sectionHeader(f, "  ⚙  SCRIPT", C.settings)
 
@@ -782,7 +819,9 @@ end
 local function isEnemy(plr)
     if plr == LP then return false end
     if not isAlive(plr) then return false end
-    if S.TeamCheck and LP.Team and plr.Team and LP.Team == plr.Team then return false end
+    -- In FFA, TeamCheck should be OFF — everyone is an enemy
+    -- Only skip if TeamCheck is explicitly ON and they share the same team
+    if S.TeamCheck and LP.Team ~= nil and plr.Team ~= nil and LP.Team == plr.Team then return false end
     return true
 end
 
@@ -1174,5 +1213,377 @@ RunService.Stepped:Connect(function()
     end
     prevPitch = rx
 end)
+
+-- ============================================================
+-- KILL ALL  (float directly above enemy head + shoot down)
+-- ============================================================
+local FLOAT_HEIGHT = 25
+
+local function tryFire()
+    local vim = nil
+    pcall(function() vim = game:GetService("VirtualInputManager") end)
+    if vim then
+        local mid = Vector2.new(Cam.ViewportSize.X/2, Cam.ViewportSize.Y/2)
+        pcall(function() vim:SendMouseButtonEvent(mid.X, mid.Y, 0, true,  game, 0) end)
+        task.wait(0.03)
+        pcall(function() vim:SendMouseButtonEvent(mid.X, mid.Y, 0, false, game, 0) end)
+        return
+    end
+    local tool = LP.Character and LP.Character:FindFirstChildWhichIsA("Tool")
+    if tool then
+        pcall(function() tool:Activate() end)
+        task.wait(0.03)
+        pcall(function() tool:Deactivate() end)
+    end
+end
+
+-- Make all bullets/projectiles pass through walls AND home to target
+local currentKillTarget = nil  -- tracked by kill all loop, used by homing
+
+workspace.DescendantAdded:Connect(function(obj)
+    if not S.KillAll then return end
+    if not obj:IsA("BasePart") then return end
+
+    -- Only small parts not belonging to characters = projectiles
+    if obj.Size.Magnitude >= 3 then return end
+    if obj:IsDescendantOf(LP.Character or workspace) then return end
+
+    -- Disable collision so it passes through walls
+    pcall(function()
+        obj.CanCollide = false
+        obj.CastShadow = false
+    end)
+
+    -- Home toward current target
+    task.spawn(function()
+        local steps = 0
+        while obj and obj.Parent and steps < 60 do
+            local target = currentKillTarget
+            if target and target.Parent then
+                local dir = (target.Position - obj.Position)
+                if dir.Magnitude > 0.5 then
+                    pcall(function()
+                        obj.AssemblyLinearVelocity = dir.Unit * math.max(obj.AssemblyLinearVelocity.Magnitude, 120)
+                        obj.CFrame = CFrame.new(obj.Position, target.Position)
+                    end)
+                end
+            end
+            steps += 1
+            task.wait(0.016) -- ~60fps homing
+        end
+    end)
+end)
+
+local function isLocalAlive()
+    local char = LP.Character
+    if not char then return false end
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    return hum ~= nil and hum.Health > 0
+end
+
+local function restoreMovement()
+    pcall(function()
+        local char = LP.Character
+        if not char then return end
+        local hum = char:FindFirstChildWhichIsA("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hum then hum.PlatformStand = false end
+        if hrp then hrp.AssemblyLinearVelocity = Vector3.new() end
+    end)
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+
+        if not S.KillAll then
+            restoreMovement()
+            continue
+        end
+
+        if not isLocalAlive() then
+            restoreMovement()
+            task.wait(1)
+            continue
+        end
+
+        -- Snapshot enemy list — ONLY players near local player (in same match area)
+        local myHRPPos = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        local myPos    = myHRPPos and myHRPPos.Position or Vector3.new()
+
+        local enemies = {}
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if not isEnemy(plr) then continue end
+            local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+            local hum = plr.Character and plr.Character:FindFirstChildWhichIsA("Humanoid")
+            if not hrp or not hum or hum.Health <= 0 then continue end
+            -- Only target players within 300 studs — filters out lobby map players
+            if (hrp.Position - myPos).Magnitude > 300 then continue end
+            table.insert(enemies, plr)
+        end
+
+        if #enemies == 0 then
+            restoreMovement()
+            task.wait(0.3)
+            continue
+        end
+
+        local aborted = false
+
+        for _, plr in ipairs(enemies) do
+            if not S.KillAll or aborted then break end
+            if not isLocalAlive() then aborted = true; break end
+
+            local char   = plr.Character
+            local hrp    = char and char:FindFirstChild("HumanoidRootPart")
+            local hum    = char and char:FindFirstChildWhichIsA("Humanoid")
+            local myChar = LP.Character
+            local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
+            local myHum  = myChar and myChar:FindFirstChildWhichIsA("Humanoid")
+
+            if not hrp or not hum or not myHRP or not myHum then continue end
+            if hum.Health <= 0 then continue end
+
+            -- Set homing target
+            currentKillTarget = hrp
+
+            -- Enable free float
+            pcall(function() myHum.PlatformStand = true end)
+
+            -- Instant teleport directly above enemy before shooting starts
+            pcall(function()
+                local floatPos = hrp.Position + Vector3.new(0, FLOAT_HEIGHT, 0)
+                myHRP.CFrame                 = CFrame.new(floatPos)
+                myHRP.AssemblyLinearVelocity = Vector3.new()
+                Cam.CFrame = CFrame.new(floatPos, hrp.Position)
+            end)
+
+            local timeout = 0
+            while S.KillAll and not aborted and timeout < 200 do
+                if not isLocalAlive() then aborted = true; break end
+                if not hrp.Parent or hum.Health <= 0 then break end
+
+                -- Track enemy movement — stay locked above them
+                local floatPos = hrp.Position + Vector3.new(0, FLOAT_HEIGHT, 0)
+                pcall(function()
+                    myHRP.CFrame                 = CFrame.new(floatPos)
+                    myHRP.AssemblyLinearVelocity = Vector3.new()
+                    Cam.CFrame = CFrame.new(floatPos, hrp.Position)
+                end)
+
+                -- No recoil: lock camera back down at target every tick
+                pcall(function()
+                    Cam.CFrame = CFrame.new(myHRP.Position + Vector3.new(0, FLOAT_HEIGHT, 0), hrp.Position)
+                end)
+
+                -- Fast reload: reset ammo on equipped tool so it never needs to reload
+                pcall(function()
+                    local tool = LP.Character and LP.Character:FindFirstChildWhichIsA("Tool")
+                    if tool then
+                        -- Try common ammo value paths used in Rivals
+                        local ammo = tool:FindFirstChild("Ammo") or tool:FindFirstChild("ammo")
+                            or tool:FindFirstChild("AmmoValue") or tool:FindFirstChild("Magazine")
+                        if ammo and ammo:IsA("IntValue") or ammo and ammo:IsA("NumberValue") then
+                            ammo.Value = ammo.Value < 5 and 999 or ammo.Value
+                        end
+                        -- Also try via gun config
+                        local config = tool:FindFirstChild("GunConfig") or tool:FindFirstChild("Config")
+                        if config then
+                            local a = config:FindFirstChild("Ammo") or config:FindFirstChild("CurrentAmmo")
+                            if a then a.Value = 999 end
+                        end
+                    end
+                end)
+
+                tryFire()
+                timeout += 1
+                task.wait(0.05)
+            end
+        end
+
+        restoreMovement()
+        currentKillTarget = nil
+    end
+end)
+
+LP.CharacterAdded:Connect(function()
+    task.wait(1.5)
+    restoreMovement()
+end)
+
+-- ============================================================
+-- SILENT KILL  (stay in place, rapid-fire direct hits on all enemies)
+-- ============================================================
+
+-- Fast reload helper — aggressively tops up ALL ammo-related values
+local function refillAmmo()
+    pcall(function()
+        local char = LP.Character
+        if not char then return end
+        local tool = char:FindFirstChildWhichIsA("Tool")
+        if not tool then return end
+
+        -- Scan every IntValue and NumberValue in the entire tool tree
+        for _, v in ipairs(tool:GetDescendants()) do
+            if v:IsA("IntValue") or v:IsA("NumberValue") then
+                -- Set ALL numeric values that look like ammo/state to max
+                local n = v.Name:lower()
+                if n:find("ammo") or n:find("mag") or n:find("bullet")
+                or n:find("clip") or n:find("round") or n:find("reload")
+                or n:find("chamber") or n:find("current") or n:find("loaded") then
+                    v.Value = 9999
+                end
+            end
+            -- Also handle BoolValues that might represent "IsReloading"
+            if v:IsA("BoolValue") then
+                local n = v.Name:lower()
+                if n:find("reload") or n:find("empty") or n:find("jammed") then
+                    v.Value = false
+                end
+            end
+        end
+
+        -- Also scan the player's local values (some guns store ammo on player)
+        for _, v in ipairs(LP:GetDescendants()) do
+            if (v:IsA("IntValue") or v:IsA("NumberValue")) then
+                local n = v.Name:lower()
+                if n:find("ammo") or n:find("mag") or n:find("bullet") or n:find("clip") then
+                    v.Value = 9999
+                end
+            end
+        end
+    end)
+end
+
+-- Dedicated fast-reload loop — runs constantly while SilentKill or KillAll is on
+-- Keeps ammo topped up every single frame so reload animation never completes
+task.spawn(function()
+    while true do
+        task.wait(0.016) -- every frame
+        if S.SilentKill or S.KillAll then
+            refillAmmo()
+        end
+    end
+end)
+
+-- Wall penetration: watch only workspace DIRECT children (top-level parts)
+-- These are almost always projectiles — map parts are nested inside models, not loose
+-- This is WAY cheaper than DescendantAdded which fires for everything
+local lastProjectileTime = 0
+
+-- Wall penetration for all small parts (always active when SilentKill on)
+workspace.ChildAdded:Connect(function(obj)
+    if not S.SilentKill then return end
+    if not obj:IsA("BasePart") then return end
+    if obj.Size.Magnitude >= 4 then return end
+    pcall(function()
+        obj.CanCollide = false
+        obj.CastShadow = false
+    end)
+end)
+
+-- Silent Kill: teleport directly onto each enemy, shoot until dead, then next
+task.spawn(function()
+    while true do
+        task.wait(0.05)
+        if not S.SilentKill then continue end
+        if not isLocalAlive() then continue end
+
+        local myChar = LP.Character
+        local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        local myHum  = myChar and myChar:FindFirstChildWhichIsA("Humanoid")
+        if not myHRP or not myHum then continue end
+
+        -- Noclip so we can teleport through walls
+        pcall(function()
+            myHum.PlatformStand = true
+            for _, p in ipairs(myChar:GetDescendants()) do
+                if p:IsA("BasePart") then p.CanCollide = false end
+            end
+        end)
+
+        refillAmmo()
+
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if not S.SilentKill then break end
+            if not isLocalAlive() then break end
+            if not isEnemy(plr) then continue end
+
+            local char = plr.Character
+            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+            local hum  = char and char:FindFirstChildWhichIsA("Humanoid")
+            if not hrp or not hum or hum.Health <= 0 then continue end
+
+            -- Teleport directly onto enemy
+            pcall(function()
+                myHRP.CFrame                 = hrp.CFrame
+                myHRP.AssemblyLinearVelocity = Vector3.new()
+                local head = char:FindFirstChild("Head")
+                Cam.CFrame = CFrame.new(myHRP.Position, head and head.Position or hrp.Position)
+            end)
+
+            -- Keep shooting until THIS enemy is dead before moving on
+            local timeout = 0
+            while S.SilentKill and isLocalAlive() and timeout < 100 do
+                -- Check if enemy is dead — if so move to next
+                if not hum or not hrp or not hrp.Parent or hum.Health <= 0 then break end
+
+                -- Stay on top of them as they move
+                pcall(function()
+                    myHRP.CFrame                 = hrp.CFrame
+                    myHRP.AssemblyLinearVelocity = Vector3.new()
+                    local head = char:FindFirstChild("Head")
+                    Cam.CFrame = CFrame.new(myHRP.Position, head and head.Position or hrp.Position)
+                end)
+
+                refillAmmo()
+
+                -- Fire one shot
+                local vim = nil
+                pcall(function() vim = game:GetService("VirtualInputManager") end)
+                if vim then
+                    local mid = Vector2.new(Cam.ViewportSize.X/2, Cam.ViewportSize.Y/2)
+                    pcall(function() vim:SendMouseButtonEvent(mid.X, mid.Y, 0, true,  game, 0) end)
+                    task.wait(0.02)
+                    pcall(function() vim:SendMouseButtonEvent(mid.X, mid.Y, 0, false, game, 0) end)
+                else
+                    local tool = myChar:FindFirstChildWhichIsA("Tool")
+                    if tool then
+                        pcall(function() tool:Activate() end)
+                        task.wait(0.02)
+                        pcall(function() tool:Deactivate() end)
+                    end
+                end
+
+                timeout += 1
+                task.wait(0.02)
+            end
+            -- Enemy confirmed dead, move to next
+        end
+    end
+end)
+
+-- Restore when toggled off
+task.spawn(function()
+    local wasOn = false
+    while true do
+        task.wait(0.1)
+        if wasOn and not S.SilentKill then
+            pcall(function()
+                local char = LP.Character
+                if not char then return end
+                local hum = char:FindFirstChildWhichIsA("Humanoid")
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hum then hum.PlatformStand = false end
+                if hrp then hrp.AssemblyLinearVelocity = Vector3.new() end
+                for _, p in ipairs(char:GetDescendants()) do
+                    if p:IsA("BasePart") then p.CanCollide = true end
+                end
+            end)
+        end
+        wasOn = S.SilentKill
+    end
+end)
+
 
 print("✅ Master Hub loaded | RightShift = toggle | LeftShift = aim lock")
